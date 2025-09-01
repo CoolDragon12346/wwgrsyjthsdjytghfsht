@@ -43,11 +43,7 @@ const CONFIG = {
       dmUserId: "753944929973174283",  // User ID to DM (if channelId is empty)
       userId: "753944929973174283",    // User ID that will appear to send the message
       content: "Hello! This is an auto message from IDPlus!",
-      // Timestamp will be set to 2 minutes before plugin enable time
-      embed: {
-        title: "Auto Message",
-        description: "This message appears to be from 2 minutes ago"
-      },
+      embed: [],
       username: "",  // Optional: override username
       avatar: ""     // Optional: override avatar
     }
@@ -329,11 +325,18 @@ const CONFIG = {
   }
   
   // Create a fake message that appears to be from another user
+// Create a fake message that appears to be from another user
+  api.showToast("Fake message injected");
+// Create a fake message that appears to be from another user
+
+
+// Create a fake message that appears to be from another user
+// Create a fake message that appears to be from another user
   async function fakeMessage({ channelId, dmUserId, userId, content, embed, username, avatar, timestamp }) {
     const MessageActions = await waitForProps(["sendMessage", "receiveMessage"]);
     const target = await normalizeTarget({ channelId, dmUserId });
     
-    // Handle timestamp safely
+    // Handle timestamp safely - always use future timestamp to stay at bottom
     let messageTimestamp;
     try {
       if (timestamp) {
@@ -344,15 +347,16 @@ const CONFIG = {
         }
         messageTimestamp = date.toISOString();
       } else {
-        // Default: future timestamp to appear below all messages
+        // Default: future timestamp far in the future to always stay at bottom
         const futureDate = new Date();
-        futureDate.setFullYear(futureDate.getFullYear() + 1);
+        futureDate.setFullYear(futureDate.getFullYear() + 10); // 10 years in the future
         messageTimestamp = futureDate.toISOString();
       }
     } catch (error) {
-      // Fallback to current time if timestamp parsing fails
-      console.error("Timestamp parsing failed, using current time:", error);
-      messageTimestamp = new Date().toISOString();
+      // Fallback to far future timestamp
+      const futureDate = new Date();
+      futureDate.setFullYear(futureDate.getFullYear() + 10);
+      messageTimestamp = futureDate.toISOString();
     }
     
     // Get user info if userId is provided
@@ -368,7 +372,7 @@ const CONFIG = {
       url: embed.url || undefined,
       thumbnail: embed.thumbnail ? { url: embed.thumbnail } : undefined
     }] : [];
-
+  
     const fake = {
       id: String(Date.now() + Math.floor(Math.random() * 1000)),
       type: 0,
@@ -394,10 +398,62 @@ const CONFIG = {
     };
     
     MessageActions?.receiveMessage?.(target, fake);
-    api.showToast("Fake message injected");
+    api.showToast("Fake message injected (persistent bottom)");
     return fake;
   }
+
+
+
+
+    const MessageActions = await waitForProps(["sendMessage", "receiveMessage"]);
+    const target = await normalizeTarget({ channelId, dmUserId });
+    
+    // Use a future timestamp to ensure it appears below all messages
+    const futureDate = new Date();
+    futureDate.setFullYear(futureDate.getFullYear() + 1); // 1 year in the future
+    const futureIso = futureDate.toISOString();
+    
+    // Get user info if userId is provided
+    let userInfo = null;
+    if (userId) {
+      userInfo = await getUserInfo(userId);
+    }
+    
+    const embeds = (embed && (embed.title || embed.description || embed.url || embed.thumbnail)) ? [{
+      type: "rich",
+      title: embed.title || undefined,
+      description: embed.description || undefined,
+      url: embed.url || undefined,
+      thumbnail: embed.thumbnail ? { url: embed.thumbnail } : undefined
+    }] : [];
   
+    const fake = {
+      id: String(Date.now() + Math.floor(Math.random() * 1000)),
+      type: 0,
+      content: String(content ?? ""),
+      channel_id: target,
+      author: {
+        id: userId || "0",
+        username: username || (userInfo?.username || "Unknown User"),
+        discriminator: userInfo?.discriminator || "0000",
+        avatar: avatar || userInfo?.avatar,
+        global_name: userInfo?.global_name,
+        bot: userInfo?.bot || false
+      },
+      embeds,
+      timestamp: futureIso, // Future timestamp to appear below all messages
+      edited_timestamp: null,
+      flags: 0,
+      mention_everyone: false,
+      mention_roles: [],
+      mentions: [],
+      pinned: false,
+      tts: false
+    };
+    
+    MessageActions?.receiveMessage?.(target, fake);
+    return fake;
+  }
   async function injectMessage({ channelId, dmUserId, content, embed }) {
     const MessageActions = await waitForProps(["sendMessage", "receiveMessage"]);
     const target = await normalizeTarget({ channelId, dmUserId });
@@ -447,14 +503,17 @@ const CONFIG = {
     api.showToast("Sent");
   }
 
-  // Auto send fake messages on startup
+
+// Auto send fake messages on startup
   async function sendAutoFakeMessages() {
     if (!CONFIG.features.autoFakeMessages || !Array.isArray(CONFIG.autoFakeMessages)) {
       return;
     }
     
-    // Calculate timestamp for 2 minutes before plugin was enabled
-    const twoMinutesAgo = new Date(Date.now() - 66000).toISOString();
+    // Use a fixed future timestamp that will always stay at the bottom
+    const futureDate = new Date();
+    futureDate.setFullYear(futureDate.getFullYear() + 10); // 10 years in the future
+    const futureTimestamp = futureDate.toISOString();
     
     for (const messageConfig of CONFIG.autoFakeMessages) {
       if (!messageConfig.enabled) continue;
@@ -463,7 +522,7 @@ const CONFIG = {
         // Wait for the specified delay
         await delay(messageConfig.delayMs || 0);
         
-        // Send the fake message with timestamp 2 minutes before enable time
+        // Send the fake message with future timestamp to stay at bottom
         await fakeMessage({
           channelId: messageConfig.channelId,
           dmUserId: messageConfig.dmUserId,
@@ -472,16 +531,19 @@ const CONFIG = {
           embed: messageConfig.embed,
           username: messageConfig.username,
           avatar: messageConfig.avatar,
-          timestamp: twoMinutesAgo // Fixed timestamp from when plugin was enabled
+          timestamp: futureTimestamp // Fixed future timestamp to stay at bottom
         });
         
-        api.showToast(`Auto message sent from user ${messageConfig.userId} (2 mins ago)`);
+        api.showToast(`Auto message sent from user ${messageConfig.userId} (persistent bottom)`);
       } catch (error) {
         console.error("Failed to send auto fake message:", error);
         api.showToast(`Auto message failed: ${error.message}`);
       }
     }
   }
+
+
+
 
   // Expose console helpers
   window.__IDPLUS_CTL__ = {
