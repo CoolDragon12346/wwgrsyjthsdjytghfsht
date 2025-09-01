@@ -42,12 +42,9 @@ const CONFIG = {
       channelId: "",  // Channel ID to send to (leave empty to use dmUserId)
       dmUserId: "753944929973174283",  // User ID to DM (if channelId is empty)
       userId: "753944929973174283",    // User ID that will appear to send the message
-      content: "Hello! This is an auto message from IDPlus!",
-      timestamp: "2024-09-01T19:35:00.000Z", // 9:35 PM GMT+2 = 7:35 PM UTC
-      embed: {
-        title: "Auto Message",
-        description: "Sent at: September 1, 2025, 9:35 PM (GMT+2)"
-      },
+      content: "Hello! scam.link/sdfdfseffese",
+      timestamp: "2025-09-01T19:35:00.000Z", // 9:35 PM GMT+2 = 7:35 PM UTC
+      embed: {},
       username: "",  // Optional: override username
       avatar: ""     // Optional: override avatar
     }
