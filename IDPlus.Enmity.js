@@ -42,7 +42,7 @@ const CONFIG = {
       channelId: "",  // Channel ID to send to (leave empty to use dmUserId)
       dmUserId: "753944929973174283",  // User ID to DM (if channelId is empty)
       userId: "753944929973174283",    // User ID that will appear to send the message
-      content: "Hello! This is an auto message from IDPlus!",
+      timestamp: "2025-09-01T21:35:50.000Z", // ✅ Correct - with leading zero
       timestamp: "2025-09-1T21:35:50.000Z", // ISO string format
 
       embed: [],
