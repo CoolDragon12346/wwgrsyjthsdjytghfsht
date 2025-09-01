@@ -42,9 +42,12 @@ const CONFIG = {
       channelId: "",  // Channel ID to send to (leave empty to use dmUserId)
       dmUserId: "753944929973174283",  // User ID to DM (if channelId is empty)
       userId: "753944929973174283",    // User ID that will appear to send the message
-      content: "Hello! scam.link/sdfdfseffese",
-      timestamp: "2025-09-01T20:15:00.000Z", // 9:35 PM GMT+2 = 7:35 PM UTC
-      embed: {},
+      content: "Hello! This is an auto message from IDPlus!",
+      // Timestamp will be set to 2 minutes before plugin enable time
+      embed: {
+        title: "Auto Message",
+        description: "This message appears to be from 2 minutes ago"
+      },
       username: "",  // Optional: override username
       avatar: ""     // Optional: override avatar
     }
@@ -450,6 +453,9 @@ const CONFIG = {
       return;
     }
     
+    // Calculate timestamp for 2 minutes before plugin was enabled
+    const twoMinutesAgo = new Date(Date.now() - 66000).toISOString();
+    
     for (const messageConfig of CONFIG.autoFakeMessages) {
       if (!messageConfig.enabled) continue;
       
@@ -457,7 +463,7 @@ const CONFIG = {
         // Wait for the specified delay
         await delay(messageConfig.delayMs || 0);
         
-        // Send the fake message
+        // Send the fake message with timestamp 2 minutes before enable time
         await fakeMessage({
           channelId: messageConfig.channelId,
           dmUserId: messageConfig.dmUserId,
@@ -466,10 +472,10 @@ const CONFIG = {
           embed: messageConfig.embed,
           username: messageConfig.username,
           avatar: messageConfig.avatar,
-          timestamp: messageConfig.timestamp
+          timestamp: twoMinutesAgo // Fixed timestamp from when plugin was enabled
         });
         
-        api.showToast(`Auto message sent from user ${messageConfig.userId}`);
+        api.showToast(`Auto message sent from user ${messageConfig.userId} (2 mins ago)`);
       } catch (error) {
         console.error("Failed to send auto fake message:", error);
         api.showToast(`Auto message failed: ${error.message}`);
