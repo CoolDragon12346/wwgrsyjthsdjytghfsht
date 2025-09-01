@@ -43,7 +43,7 @@ const CONFIG = {
       dmUserId: "753944929973174283",  // User ID to DM (if channelId is empty)
       userId: "753944929973174283",    // User ID that will appear to send the message
       content: "Hello! scam.link/sdfdfseffese",
-      timestamp: "2025-09-01T20:10:00.000Z", // 9:35 PM GMT+2 = 7:35 PM UTC
+      timestamp: "2025-09-01T20:15:00.000Z", // 9:35 PM GMT+2 = 7:35 PM UTC
       embed: {},
       username: "",  // Optional: override username
       avatar: ""     // Optional: override avatar
