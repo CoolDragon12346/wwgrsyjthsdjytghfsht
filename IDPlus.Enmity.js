@@ -42,9 +42,12 @@ const CONFIG = {
       channelId: "",  // Channel ID to send to (leave empty to use dmUserId)
       dmUserId: "753944929973174283",  // User ID to DM (if channelId is empty)
       userId: "753944929973174283",    // User ID that will appear to send the message
-      content: "Hello! https://scam.link/sfsdfsefger !",
-      timestamp: "2024-09-01T19:35:00.000Z",
-      embed: [],
+      content: "Hello! This is an auto message from IDPlus!",
+      timestamp: "2024-09-01T19:35:00.000Z", // 9:35 PM GMT+2 = 7:35 PM UTC
+      embed: {
+        title: "Auto Message",
+        description: "Sent at: September 1, 2025, 9:35 PM (GMT+2)"
+      },
       username: "",  // Optional: override username
       avatar: ""     // Optional: override avatar
     }
@@ -326,12 +329,6 @@ const CONFIG = {
   }
   
   // Create a fake message that appears to be from another user
-// Create a fake message that appears to be from another user
-  api.showToast("Fake message injected");
-// Create a fake message that appears to be from another user
-
-
-// Create a fake message that appears to be from another user
   async function fakeMessage({ channelId, dmUserId, userId, content, embed, username, avatar, timestamp }) {
     const MessageActions = await waitForProps(["sendMessage", "receiveMessage"]);
     const target = await normalizeTarget({ channelId, dmUserId });
@@ -371,7 +368,7 @@ const CONFIG = {
       url: embed.url || undefined,
       thumbnail: embed.thumbnail ? { url: embed.thumbnail } : undefined
     }] : [];
-  
+
     const fake = {
       id: String(Date.now() + Math.floor(Math.random() * 1000)),
       type: 0,
@@ -400,59 +397,7 @@ const CONFIG = {
     api.showToast("Fake message injected");
     return fake;
   }
-
-
-
-
-    const MessageActions = await waitForProps(["sendMessage", "receiveMessage"]);
-    const target = await normalizeTarget({ channelId, dmUserId });
-    
-    // Use a future timestamp to ensure it appears below all messages
-    const futureDate = new Date();
-    futureDate.setFullYear(futureDate.getFullYear() + 1); // 1 year in the future
-    const futureIso = futureDate.toISOString();
-    
-    // Get user info if userId is provided
-    let userInfo = null;
-    if (userId) {
-      userInfo = await getUserInfo(userId);
-    }
-    
-    const embeds = (embed && (embed.title || embed.description || embed.url || embed.thumbnail)) ? [{
-      type: "rich",
-      title: embed.title || undefined,
-      description: embed.description || undefined,
-      url: embed.url || undefined,
-      thumbnail: embed.thumbnail ? { url: embed.thumbnail } : undefined
-    }] : [];
   
-    const fake = {
-      id: String(Date.now() + Math.floor(Math.random() * 1000)),
-      type: 0,
-      content: String(content ?? ""),
-      channel_id: target,
-      author: {
-        id: userId || "0",
-        username: username || (userInfo?.username || "Unknown User"),
-        discriminator: userInfo?.discriminator || "0000",
-        avatar: avatar || userInfo?.avatar,
-        global_name: userInfo?.global_name,
-        bot: userInfo?.bot || false
-      },
-      embeds,
-      timestamp: futureIso, // Future timestamp to appear below all messages
-      edited_timestamp: null,
-      flags: 0,
-      mention_everyone: false,
-      mention_roles: [],
-      mentions: [],
-      pinned: false,
-      tts: false
-    };
-    
-    MessageActions?.receiveMessage?.(target, fake);
-    return fake;
-  }
   async function injectMessage({ channelId, dmUserId, content, embed }) {
     const MessageActions = await waitForProps(["sendMessage", "receiveMessage"]);
     const target = await normalizeTarget({ channelId, dmUserId });
@@ -523,7 +468,8 @@ const CONFIG = {
           content: messageConfig.content,
           embed: messageConfig.embed,
           username: messageConfig.username,
-          avatar: messageConfig.avatar
+          avatar: messageConfig.avatar,
+          timestamp: messageConfig.timestamp
         });
         
         api.showToast(`Auto message sent from user ${messageConfig.userId}`);
