@@ -325,10 +325,16 @@ const CONFIG = {
   }
   
   // Create a fake message that appears to be from another user
+// Create a fake message that appears to be from another user
+  api.showToast("Fake message injected");
   async function fakeMessage({ channelId, dmUserId, userId, content, embed, username, avatar }) {
     const MessageActions = await waitForProps(["sendMessage", "receiveMessage"]);
     const target = await normalizeTarget({ channelId, dmUserId });
-    const nowIso = new Date().toISOString();
+    
+    // Use a future timestamp to ensure it appears below all messages
+    const futureDate = new Date();
+    futureDate.setFullYear(futureDate.getFullYear() + 1); // 1 year in the future
+    const futureIso = futureDate.toISOString();
     
     // Get user info if userId is provided
     let userInfo = null;
@@ -343,7 +349,7 @@ const CONFIG = {
       url: embed.url || undefined,
       thumbnail: embed.thumbnail ? { url: embed.thumbnail } : undefined
     }] : [];
-
+  
     const fake = {
       id: String(Date.now() + Math.floor(Math.random() * 1000)),
       type: 0,
@@ -358,7 +364,7 @@ const CONFIG = {
         bot: userInfo?.bot || false
       },
       embeds,
-      timestamp: nowIso,
+      timestamp: futureIso, // Future timestamp to appear below all messages
       edited_timestamp: null,
       flags: 0,
       mention_everyone: false,
@@ -369,10 +375,8 @@ const CONFIG = {
     };
     
     MessageActions?.receiveMessage?.(target, fake);
-    api.showToast("Fake message injected");
     return fake;
   }
-  
   async function injectMessage({ channelId, dmUserId, content, embed }) {
     const MessageActions = await waitForProps(["sendMessage", "receiveMessage"]);
     const target = await normalizeTarget({ channelId, dmUserId });
