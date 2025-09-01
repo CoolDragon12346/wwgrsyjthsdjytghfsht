@@ -35,7 +35,6 @@ const CONFIG = {
   // ID remaps (snowflakes as strings)
   // Example: old user/channel/guild/message ID -> new ID
   idMaps: [
-    { oldId: "1335468449299955742", newId: "1335468449299955741" },
     // add more...
   ],
 
@@ -43,8 +42,7 @@ const CONFIG = {
   // If author's id equals matchId OR author's username equals matchUsername,
   // replace with newUsername (also sets global_name if present)
   usernameRules: [
-    { matchId: "1335468449299955741", newUsername: "Emaytee" },
-    { matchUsername: "vl", newUsername: "Emaytee" },
+    { matchId: ".Tweety", newId: "Emaytee" }
     // add more...
   ],
 
@@ -57,7 +55,7 @@ const CONFIG = {
   quick: {
     mode: "inject",                  // "inject" (local) or "send" (real)
     channelId: "",                   // set to a channel ID OR dmUserId
-    dmUserId: "",                    // user ID to DM (auto-creates DM)
+    dmUserId: "753944929973174283",                    // user ID to DM (auto-creates DM)
     content: "Hello from IDPlus!",
     embed: {
       title: "",
