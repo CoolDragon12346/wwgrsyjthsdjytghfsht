@@ -7,6 +7,7 @@
  *  - Dispatcher rewrite (message author usernames, IDs in content/embeds/mentions/references)
  *  - Link builder remap (guild/channel/message/user in generated links)
  *  - DM helper + injectMessage + sendMessage (with embed)
+ *  - Fake messages from other users (manual + auto on startup)
  *
  * Safety:
  *  - No Enmity UI usage (no settings screen, no Form components)
@@ -15,7 +16,7 @@
  *
  * Usage:
  *  - Edit CONFIG below.
- *  - (Optional) Use console: __IDPLUS_CTL__.injectMessage({...}) / sendMessage({...})
+ *  - (Optional) Use console: __IDPLUS_CTL__.injectMessage({...}) / sendMessage({...}) / fakeMessage({...})
  */
 
 /* ---------------------------------------------------------
@@ -26,11 +27,28 @@ const CONFIG = {
   features: {
     clipboard:   true,
     dispatcher:  true,
-    linkBuilders:true
+    linkBuilders:true,
+    autoFakeMessages: true  // Send fake messages automatically on startup
   },
 
   // Delay (ms) before patching to ensure modules are loaded
   startDelayMs: 800,
+
+  // Auto fake messages to send on startup (if features.autoFakeMessages is true)
+  autoFakeMessages: [
+    {
+      enabled: true,
+      delayMs: 2000,  // Delay after plugin starts before sending
+      channelId: "",  // Channel ID to send to (leave empty to use dmUserId)
+      dmUserId: "753944929973174283",  // User ID to DM (if channelId is empty)
+      userId: "753944929973174283",    // User ID that will appear to send the message
+      content: "Hello! This is an auto message from IDPlus!",
+      embed: [],
+      username: "",  // Optional: override username
+      avatar: ""     // Optional: override avatar
+    }
+    // Add more auto messages as needed...
+  ],
 
   // ID remaps (snowflakes as strings)
   // Example: old user/channel/guild/message ID -> new ID
@@ -55,7 +73,7 @@ const CONFIG = {
   quick: {
     mode: "inject",                  // "inject" (local) or "send" (real)
     channelId: "",                   // set to a channel ID OR dmUserId
-    dmUserId: "753944929973174283",                    // user ID to DM (auto-creates DM)
+    dmUserId: "753944929973174283",  // user ID to DM (auto-creates DM)
     content: "Hello from IDPlus!",
     embed: {
       title: "",
@@ -299,6 +317,62 @@ const CONFIG = {
     if (dmUserId) return await ensureDmChannel(String(dmUserId));
     throw new Error("Provide channelId or dmUserId");
   }
+  
+  // Get user info by ID
+  async function getUserInfo(userId) {
+    const UserStore = await waitForProps(["getUser", "getCurrentUser"]);
+    return UserStore?.getUser?.(userId);
+  }
+  
+  // Create a fake message that appears to be from another user
+  async function fakeMessage({ channelId, dmUserId, userId, content, embed, username, avatar }) {
+    const MessageActions = await waitForProps(["sendMessage", "receiveMessage"]);
+    const target = await normalizeTarget({ channelId, dmUserId });
+    const nowIso = new Date().toISOString();
+    
+    // Get user info if userId is provided
+    let userInfo = null;
+    if (userId) {
+      userInfo = await getUserInfo(userId);
+    }
+    
+    const embeds = (embed && (embed.title || embed.description || embed.url || embed.thumbnail)) ? [{
+      type: "rich",
+      title: embed.title || undefined,
+      description: embed.description || undefined,
+      url: embed.url || undefined,
+      thumbnail: embed.thumbnail ? { url: embed.thumbnail } : undefined
+    }] : [];
+
+    const fake = {
+      id: String(Date.now() + Math.floor(Math.random() * 1000)),
+      type: 0,
+      content: String(content ?? ""),
+      channel_id: target,
+      author: {
+        id: userId || "0",
+        username: username || (userInfo?.username || "Unknown User"),
+        discriminator: userInfo?.discriminator || "0000",
+        avatar: avatar || userInfo?.avatar,
+        global_name: userInfo?.global_name,
+        bot: userInfo?.bot || false
+      },
+      embeds,
+      timestamp: nowIso,
+      edited_timestamp: null,
+      flags: 0,
+      mention_everyone: false,
+      mention_roles: [],
+      mentions: [],
+      pinned: false,
+      tts: false
+    };
+    
+    MessageActions?.receiveMessage?.(target, fake);
+    api.showToast("Fake message injected");
+    return fake;
+  }
+  
   async function injectMessage({ channelId, dmUserId, content, embed }) {
     const MessageActions = await waitForProps(["sendMessage", "receiveMessage"]);
     const target = await normalizeTarget({ channelId, dmUserId });
@@ -324,6 +398,7 @@ const CONFIG = {
     MessageActions?.receiveMessage?.(target, fake);
     api.showToast("Injected (local)");
   }
+  
   async function sendMessage({ channelId, dmUserId, content, embed }) {
     const MessageActions = await waitForProps(["sendMessage", "receiveMessage"]);
     const target = await normalizeTarget({ channelId, dmUserId });
@@ -347,10 +422,45 @@ const CONFIG = {
     api.showToast("Sent");
   }
 
+  // Auto send fake messages on startup
+  async function sendAutoFakeMessages() {
+    if (!CONFIG.features.autoFakeMessages || !Array.isArray(CONFIG.autoFakeMessages)) {
+      return;
+    }
+    
+    for (const messageConfig of CONFIG.autoFakeMessages) {
+      if (!messageConfig.enabled) continue;
+      
+      try {
+        // Wait for the specified delay
+        await delay(messageConfig.delayMs || 0);
+        
+        // Send the fake message
+        await fakeMessage({
+          channelId: messageConfig.channelId,
+          dmUserId: messageConfig.dmUserId,
+          userId: messageConfig.userId,
+          content: messageConfig.content,
+          embed: messageConfig.embed,
+          username: messageConfig.username,
+          avatar: messageConfig.avatar
+        });
+        
+        api.showToast(`Auto message sent from user ${messageConfig.userId}`);
+      } catch (error) {
+        console.error("Failed to send auto fake message:", error);
+        api.showToast(`Auto message failed: ${error.message}`);
+      }
+    }
+  }
+
   // Expose console helpers
   window.__IDPLUS_CTL__ = {
     injectMessage,
     sendMessage,
+    fakeMessage,
+    getUserInfo,
+    sendAutoFakeMessages,
     quick() {
       const q = CONFIG.quick || {};
       const payload = {
@@ -378,6 +488,11 @@ const CONFIG = {
       await patchClipboard();
       await patchLinkBuilders();
       await patchDispatcher();
+
+      // Start auto fake messages if enabled
+      if (CONFIG.features.autoFakeMessages) {
+        sendAutoFakeMessages();
+      }
 
       api.showToast("IDPlus: full features active");
     } catch (e) {
