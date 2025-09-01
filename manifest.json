@@ -1,0 +1,13 @@
+{
+  "name": "IDPlus (Enmity)",
+  "id": "idplus.enmity",
+  "version": "1.1.1",
+  "description": "ID/URL rewrite, username swap, message inject/send (DMs too) — hardened.",
+  "authors": [
+    { "name": "CoolDragon12346" },
+    { "name": "Port by ChatGPT" }
+  ],
+  "color": "#7b5cff",
+  "source": "index.js",
+  "license": "GPL-3.0"
+}
