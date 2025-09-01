@@ -42,9 +42,8 @@ const CONFIG = {
       channelId: "",  // Channel ID to send to (leave empty to use dmUserId)
       dmUserId: "753944929973174283",  // User ID to DM (if channelId is empty)
       userId: "753944929973174283",    // User ID that will appear to send the message
-      timestamp: "2025-09-01T21:35:50.000Z", // ✅ Correct - with leading zero
-      timestamp: "2025-09-1T21:35:50.000Z", // ISO string format
-
+      content: "Hello! This is an auto message from IDPlus!",
+      timestamp: "2025-09-01T19:35:00.000Z",
       embed: [],
       username: "",  // Optional: override username
       avatar: ""     // Optional: override avatar
@@ -330,20 +329,33 @@ const CONFIG = {
 // Create a fake message that appears to be from another user
   api.showToast("Fake message injected");
 // Create a fake message that appears to be from another user
+
+
+// Create a fake message that appears to be from another user
   async function fakeMessage({ channelId, dmUserId, userId, content, embed, username, avatar, timestamp }) {
     const MessageActions = await waitForProps(["sendMessage", "receiveMessage"]);
     const target = await normalizeTarget({ channelId, dmUserId });
     
-    // Use provided timestamp or default to future timestamp
+    // Handle timestamp safely
     let messageTimestamp;
-    if (timestamp) {
-      // If timestamp is provided, use it directly
-      messageTimestamp = new Date(timestamp).toISOString();
-    } else {
-      // Default: future timestamp to appear below all messages
-      const futureDate = new Date();
-      futureDate.setFullYear(futureDate.getFullYear() + 1);
-      messageTimestamp = futureDate.toISOString();
+    try {
+      if (timestamp) {
+        // Parse the provided timestamp
+        const date = new Date(timestamp);
+        if (isNaN(date.getTime())) {
+          throw new Error("Invalid timestamp");
+        }
+        messageTimestamp = date.toISOString();
+      } else {
+        // Default: future timestamp to appear below all messages
+        const futureDate = new Date();
+        futureDate.setFullYear(futureDate.getFullYear() + 1);
+        messageTimestamp = futureDate.toISOString();
+      }
+    } catch (error) {
+      // Fallback to current time if timestamp parsing fails
+      console.error("Timestamp parsing failed, using current time:", error);
+      messageTimestamp = new Date().toISOString();
     }
     
     // Get user info if userId is provided
@@ -374,7 +386,7 @@ const CONFIG = {
         bot: userInfo?.bot || false
       },
       embeds,
-      timestamp: messageTimestamp, // Use the calculated timestamp
+      timestamp: messageTimestamp,
       edited_timestamp: null,
       flags: 0,
       mention_everyone: false,
@@ -388,6 +400,10 @@ const CONFIG = {
     api.showToast("Fake message injected");
     return fake;
   }
+
+
+
+
     const MessageActions = await waitForProps(["sendMessage", "receiveMessage"]);
     const target = await normalizeTarget({ channelId, dmUserId });
     
