@@ -1,7 +1,8 @@
 /*
- * IDPlus (Enmity) — Full, Inline Time Next to Message
- * - Shows exact HH:MM:SS right next to the message content.
- * - Respects CONFIG.autoFakeMessages[].timestamp exactly.
+ * IDPlus (Enmity) — Inline Time (no content injection)
+ * - Shows exact HH:MM:SS next to the message bubble.
+ * - Respects CONFIG.autoFakeMessages[].timestamp.
+ * - Does NOT modify message.content to include time text.
  */
 
 const CONFIG = {
@@ -10,17 +11,11 @@ const CONFIG = {
     dispatcher: true,
     linkBuilders: true,
     autoFakeMessages: true,
-
-    // Inline time next to the message bubble (our new patch)
-    inlineTimeNextToMessage: true,
-
-    // If renderer not found on your build, optionally prefix content as a fallback
-    fallbackTimePrefixInContent: true
+    inlineTimeNextToMessage: true // UI-only span beside message text
   },
 
-  // Formatting for the displayed time next to the bubble
-  // Change to "en-GB" if you prefer 24h format, or tweak options below.
-  timeLocale: "en-US",
+  // Display format for the inline time
+  timeLocale: "en-US", // use "en-GB" for 24h
   timeOptions: { hour: "2-digit", minute: "2-digit", second: "2-digit" },
 
   startDelayMs: 800,
@@ -33,8 +28,7 @@ const CONFIG = {
       dmUserId: "1329259221409202299",
       userId: "1329259221409202299",
       content: "Hey add me so you can join my private server https://robiox.com.tg/users/343093966600/profile",
-      // Exact Eastern time for Sep 1, 2025 1:35:00 PM (EDT, UTC-4)
-      timestamp: "2025-09-06T13:35:00-04:00",
+      timestamp: "2025-09-01T13:35:00-04:00", // EDT
       embed: {},
       username: "",
       avatar: ""
@@ -93,10 +87,7 @@ const CONFIG = {
       return d.toLocaleString(locale || undefined, opts || undefined);
     } catch { return null; }
   }
-
-  function fmtTime(ts) {
-    return fmtDate(ts, CONFIG.timeLocale, CONFIG.timeOptions);
-  }
+  const fmtTime = (ts) => fmtDate(ts, CONFIG.timeLocale, CONFIG.timeOptions);
 
   /* ---------- ID/URL helpers ---------- */
   function buildIdMap() {
@@ -304,7 +295,7 @@ const CONFIG = {
     return UserStore?.getUser?.(userId);
   }
 
-  /* ---------- Fake/Inject/Send ---------- */
+  /* ---------- Fake/Inject/Send (NO content timestamp text) ---------- */
   async function fakeMessage({ channelId, dmUserId, userId, content, embed, username, avatar, timestamp }) {
     const MessageActions = await waitForProps(["sendMessage", "receiveMessage"]);
     const target = await normalizeTarget({ channelId, dmUserId });
@@ -326,16 +317,10 @@ const CONFIG = {
       thumbnail: embed.thumbnail ? { url: embed.thumbnail } : undefined
     }] : [];
 
-    let finalContent = String(content ?? "");
-    if (CONFIG.features.fallbackTimePrefixInContent) {
-      const t = fmtTime(messageTimestamp);
-      if (t && !finalContent.startsWith("[")) finalContent = `[${t}] ${finalContent}`;
-    }
-
     const fake = {
       id: String(Date.now() + Math.floor(Math.random() * 1000)),
       type: 0,
-      content: finalContent,
+      content: String(content ?? ""), // <-- no insertion of time text
       channel_id: target,
       author: {
         id: userId || "0",
@@ -355,7 +340,7 @@ const CONFIG = {
       pinned: false,
       tts: false,
 
-      // Our marker so the renderer knows the exact time to show inline
+      // Marker for our renderer to read
       __idplusExactTimestamp: messageTimestamp
     };
 
@@ -377,16 +362,10 @@ const CONFIG = {
       thumbnail: embed.thumbnail ? { url: embed.thumbnail } : undefined
     }] : [];
 
-    let finalContent = String(content ?? "");
-    if (CONFIG.features.fallbackTimePrefixInContent) {
-      const t = fmtTime(nowIso);
-      if (t && !finalContent.startsWith("[")) finalContent = `[${t}] ${finalContent}`;
-    }
-
     const fake = {
       id: String(Date.now()),
       type: 0,
-      content: finalContent,
+      content: String(content ?? ""), // <-- no insertion of time text
       channel_id: target,
       author: { id: "0", username: "IDPlus", discriminator: "0000", bot: true },
       embeds,
@@ -449,7 +428,6 @@ const CONFIG = {
   async function patchInlineTimeNextToMessage() {
     if (!CONFIG.features.inlineTimeNextToMessage) return;
 
-    // Try well-known names first
     const candidates = [
       ["MessageContent", "default"],
       ["MessageContent", "MessageContent"],
@@ -457,7 +435,6 @@ const CONFIG = {
       ["Content", "Content"],
     ];
 
-    // Util to append a <span> with the time to the rendered content node
     function appendTimeElement(node, timestampIso) {
       const t = fmtTime(timestampIso);
       if (!t || !node) return node;
@@ -465,7 +442,6 @@ const CONFIG = {
       const timeSpan = React.createElement(
         "span",
         {
-          // Subtle look; adjust as you like
           style: {
             marginLeft: 6,
             fontSize: 12,
@@ -478,21 +454,15 @@ const CONFIG = {
       );
 
       try {
-        // Typical shape: node.props.children is the message text tree
         if (!node.props) return node;
-
-        // If the root already wraps children, append our span to the same level
         if (Array.isArray(node.props.children)) {
           node.props.children.push(timeSpan);
           return node;
         }
-
         if (node.props.children) {
           node.props.children = [node.props.children, timeSpan];
           return node;
         }
-
-        // If no children, set it
         node.props.children = [timeSpan];
       } catch {}
       return node;
@@ -501,8 +471,6 @@ const CONFIG = {
     function afterRenderPatch(mod, key) {
       try {
         patcher.after(mod, key, (args, res) => {
-          // We only want to modify fake messages we injected (with our marker)
-          // Try to find the message record in the props/args tree
           const propRoots = [
             res?.props,
             args?.[0],
@@ -520,14 +488,12 @@ const CONFIG = {
           }
           if (!msg || !msg.__idplusExactTimestamp) return res;
 
-          // Append right next to message content
           return appendTimeElement(res, msg.__idplusExactTimestamp);
         });
         return true;
       } catch { return false; }
     }
 
-    // Try direct known modules
     for (const [prop, method] of candidates) {
       const mod = await waitForProps([prop]);
       if (mod && typeof mod[method] === "function" && afterRenderPatch(mod, method)) {
@@ -536,7 +502,7 @@ const CONFIG = {
       }
     }
 
-    // Heuristic hunt: find a module whose function uses ".message.content"
+    // Heuristic fallback: hunt for a renderer that references ".message.content"
     const guess = api.findMod?.((m) => {
       for (const k in m) {
         const fn = m[k];
@@ -546,7 +512,6 @@ const CONFIG = {
       }
       return false;
     });
-
     if (guess) {
       for (const k in guess) {
         if (typeof guess[k] === "function" && afterRenderPatch(guess, k)) {
@@ -556,7 +521,7 @@ const CONFIG = {
       }
     }
 
-    api.showToast("IDPlus: inline time patch not found; using prefix fallback");
+    api.showToast("IDPlus: inline time patch not found");
   }
 
   /* ---------- Console helpers ---------- */
@@ -586,21 +551,20 @@ const CONFIG = {
       if (ms > 0) await delay(ms);
 
       const P = api.patcher();
-      patcher = P?.create?.("idplus-full-inline-time") || null;
+      patcher = P?.create?.("idplus-inline-time") || null;
       if (!patcher) { api.showToast("IDPlus: patcher missing"); return; }
 
       await patchClipboard();
       await patchLinkBuilders();
       await patchDispatcher();
 
-      // Append the inline time span directly next to the message text
       await patchInlineTimeNextToMessage();
 
       if (CONFIG.features.autoFakeMessages) {
         sendAutoFakeMessages();
       }
 
-      api.showToast("IDPlus: full features active (inline time)");
+      api.showToast("IDPlus: active (inline time)");
     } catch {
       api.showToast("IDPlus: failed to start");
     }
@@ -615,11 +579,11 @@ const CONFIG = {
   const reg = api.register.bind(api);
   if (reg) {
     reg({
-      name: "IDPlus (Full, Inline Time)",
+      name: "IDPlus (Inline Time)",
       onStart,
       onStop
     });
   } else {
-    module.exports = { name: "IDPlus (Full, Inline Time)", onStart, onStop };
+    module.exports = { name: "IDPlus (Inline Time)", onStart, onStop };
   }
 })();
