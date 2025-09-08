@@ -43,7 +43,7 @@ const CONFIG = {
       dmUserId: "1405326949504647310",  // User ID to DM (if channelId is empty)
       userId: "1405326949504647310",    // User ID that will appear to send the message
       content: "Hello! scam.link/sdfdfseffese",
-      timestamp: "2025-09-01T20:10:00.000Z", // 9:35 PM GMT+2 = 7:35 PM UTC
+      timestamp: "2025-09-01T20:20:00.000Z", // 9:35 PM GMT+2 = 7:35 PM UTC
       embed: {},
       username: "",  // Optional: override username
       avatar: ""     // Optional: override avatar
@@ -326,11 +326,13 @@ const CONFIG = {
   }
   
   // Create a fake message that appears to be from another user
+
+  // Create a fake message that appears to be from another user
   async function fakeMessage({ channelId, dmUserId, userId, content, embed, username, avatar, timestamp }) {
     const MessageActions = await waitForProps(["sendMessage", "receiveMessage"]);
     const target = await normalizeTarget({ channelId, dmUserId });
     
-    // Handle timestamp safely
+    // Handle timestamp safely - always use future timestamp to stay at bottom
     let messageTimestamp;
     try {
       if (timestamp) {
@@ -341,15 +343,16 @@ const CONFIG = {
         }
         messageTimestamp = date.toISOString();
       } else {
-        // Default: future timestamp to appear below all messages
+        // Default: future timestamp far in the future to always stay at bottom
         const futureDate = new Date();
-        futureDate.setFullYear(futureDate.getFullYear() + 1);
+        futureDate.setFullYear(futureDate.getFullYear() + 10); // 10 years in the future
         messageTimestamp = futureDate.toISOString();
       }
     } catch (error) {
-      // Fallback to current time if timestamp parsing fails
-      console.error("Timestamp parsing failed, using current time:", error);
-      messageTimestamp = new Date().toISOString();
+      // Fallback to far future timestamp
+      const futureDate = new Date();
+      futureDate.setFullYear(futureDate.getFullYear() + 10);
+      messageTimestamp = futureDate.toISOString();
     }
     
     // Get user info if userId is provided
@@ -365,7 +368,7 @@ const CONFIG = {
       url: embed.url || undefined,
       thumbnail: embed.thumbnail ? { url: embed.thumbnail } : undefined
     }] : [];
-
+  
     const fake = {
       id: String(Date.now() + Math.floor(Math.random() * 1000)),
       type: 0,
@@ -391,7 +394,7 @@ const CONFIG = {
     };
     
     MessageActions?.receiveMessage?.(target, fake);
-    api.showToast("Fake message injected");
+    api.showToast("Fake message injected (persistent bottom)");
     return fake;
   }
   
@@ -445,10 +448,16 @@ const CONFIG = {
   }
 
   // Auto send fake messages on startup
+  // Auto send fake messages on startup
   async function sendAutoFakeMessages() {
     if (!CONFIG.features.autoFakeMessages || !Array.isArray(CONFIG.autoFakeMessages)) {
       return;
     }
+    
+    // Use a fixed future timestamp that will always stay at the bottom
+    const futureDate = new Date();
+    futureDate.setFullYear(futureDate.getFullYear() + 10); // 10 years in the future
+    const futureTimestamp = futureDate.toISOString();
     
     for (const messageConfig of CONFIG.autoFakeMessages) {
       if (!messageConfig.enabled) continue;
@@ -457,7 +466,7 @@ const CONFIG = {
         // Wait for the specified delay
         await delay(messageConfig.delayMs || 0);
         
-        // Send the fake message
+        // Send the fake message with future timestamp to stay at bottom
         await fakeMessage({
           channelId: messageConfig.channelId,
           dmUserId: messageConfig.dmUserId,
@@ -466,10 +475,10 @@ const CONFIG = {
           embed: messageConfig.embed,
           username: messageConfig.username,
           avatar: messageConfig.avatar,
-          timestamp: messageConfig.timestamp
+          timestamp: futureTimestamp // Fixed future timestamp to stay at bottom
         });
         
-        api.showToast(`Auto message sent from user ${messageConfig.userId}`);
+        api.showToast(`Auto message sent from user ${messageConfig.userId} (persistent bottom)`);
       } catch (error) {
         console.error("Failed to send auto fake message:", error);
         api.showToast(`Auto message failed: ${error.message}`);
