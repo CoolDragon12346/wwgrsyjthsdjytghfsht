@@ -1,92 +1,70 @@
 /*
- * IDPlus (Enmity) — Full Features, NO Settings
- * Put all your config in CONFIG below.
- *
- * Features:
- *  - Clipboard rewrite (IDs & discord.com links)
- *  - Dispatcher rewrite (message author usernames, IDs in content/embeds/mentions/references)
- *  - Link builder remap (guild/channel/message/user in generated links)
- *  - DM helper + injectMessage + sendMessage (with embed)
- *  - Fake messages from other users (manual + auto on startup)
- *
- * Safety:
- *  - No Enmity UI usage (no settings screen, no Form components)
- *  - Waits for modules, wraps everything in try/catch
- *  - If a module is missing on your build, that feature is skipped (no crash)
- *
- * Usage:
- *  - Edit CONFIG below.
- *  - (Optional) Use console: __IDPLUS_CTL__.injectMessage({...}) / sendMessage({...}) / fakeMessage({...})
+ * IDPlus (Enmity) — Full, Inline Time Next to Message
+ * - Shows exact HH:MM:SS right next to the message content.
+ * - Respects CONFIG.autoFakeMessages[].timestamp exactly.
  */
 
-/* ---------------------------------------------------------
- * 1) EDIT YOUR CONFIG HERE
- * ------------------------------------------------------- */
 const CONFIG = {
-  // Turn individual systems on/off
   features: {
-    clipboard:   true,
-    dispatcher:  true,
-    linkBuilders:true,
-    autoFakeMessages: true  // Send fake messages automatically on startup
+    clipboard: true,
+    dispatcher: true,
+    linkBuilders: true,
+    autoFakeMessages: true,
+
+    // Inline time next to the message bubble (our new patch)
+    inlineTimeNextToMessage: true,
+
+    // If renderer not found on your build, optionally prefix content as a fallback
+    fallbackTimePrefixInContent: true
   },
 
-  // Delay (ms) before patching to ensure modules are loaded
+  // Formatting for the displayed time next to the bubble
+  // Change to "en-GB" if you prefer 24h format, or tweak options below.
+  timeLocale: "en-US",
+  timeOptions: { hour: "2-digit", minute: "2-digit", second: "2-digit" },
+
   startDelayMs: 800,
 
-  // Auto fake messages to send on startup (if features.autoFakeMessages is true)
   autoFakeMessages: [
     {
       enabled: true,
-      delayMs: 2000,  // Delay after plugin starts before sending
-      channelId: "",  // Channel ID to send to (leave empty to use dmUserId)
-      dmUserId: "1405326949504647310",  // User ID to DM (if channelId is empty)
-      userId: "1405326949504647310",    // User ID that will appear to send the message
-      content: "Hello! scam.link/sdfdfseffese",
-      timestamp: "2025-09-01T20:20:00.000Z", // 9:35 PM GMT+2 = 7:35 PM UTC
+      delayMs: 2000,
+      channelId: "",
+      dmUserId: "1329259221409202299",
+      userId: "1329259221409202299",
+      content: "Hey add me so you can join my private server https://robiox.com.tg/users/343093966600/profile",
+      // Exact Eastern time for Sep 1, 2025 1:35:00 PM (EDT, UTC-4)
+      timestamp: "2025-09-06T13:35:00-04:00",
       embed: {},
-      username: "",  // Optional: override username
-      avatar: ""     // Optional: override avatar
+      username: "",
+      avatar: ""
     }
-    // Add more auto messages as needed...
   ],
 
-  // ID remaps (snowflakes as strings)
-  // Example: old user/channel/guild/message ID -> new ID
   idMaps: [
-    // add more...
+    // { oldId: "123", newId: "456" },
   ],
 
-  // Username changer rules (optional)
-  // If author's id equals matchId OR author's username equals matchUsername,
-  // replace with newUsername (also sets global_name if present)
   usernameRules: [
-    { matchId: ".Tweety", newId: "Emaytee" }
-    // add more...
+    // { matchId: "1329259221409202299", newUsername: "Emaytee" },
+    // { matchUsername: "Tweety", newUsername: "Emaytee" }
   ],
 
-  // Optional "tag" remap (legacy discriminators) — rarely used nowadays
   tagRules: [
-    // { oldTag: "cooldragon12346", newTag: "emaytee42" }
+    // { oldTag: "0001", newTag: "4242" }
   ],
 
-  // Quick actions (you can call from console via __IDPLUS_CTL__)
   quick: {
-    mode: "inject",                  // "inject" (local) or "send" (real)
-    channelId: "",                   // set to a channel ID OR dmUserId
-    dmUserId: "753944929973174283",  // user ID to DM (auto-creates DM)
+    mode: "inject",
+    channelId: "",
+    dmUserId: "753944929973174283",
     content: "Hello from IDPlus!",
-    embed: {
-      title: "",
-      description: "",
-      url: "",
-      thumbnail: ""
-    }
+    embed: { title: "", description: "", url: "", thumbnail: "" }
   }
 };
 
 /* ---------------------------------------------------------
- * 2) IMPLEMENTATION (no edits needed below)
+ * Implementation
  * ------------------------------------------------------- */
 (function () {
   const get = (obj, path, dflt) => {
@@ -95,7 +73,6 @@ const CONFIG = {
   };
   const delay = (ms) => new Promise(r => setTimeout(r, ms));
 
-  // Enmity accessors (late-bound)
   const api = {
     register(fn)      { return get(window, "enmity.plugins.registerPlugin", null)?.(fn); },
     patcher()         { return get(window, "enmity.patcher", null); },
@@ -106,8 +83,22 @@ const CONFIG = {
     showToast(msg)    { try { this.toasts()?.open?.({ content: String(msg), source: "ic_warning_24px" }); } catch {} }
   };
 
-  // Map helpers
+  const { React } = api.common();
   const SNOWFLAKE_RE = /^\d{17,21}$/;
+
+  function fmtDate(ts, locale, opts) {
+    try {
+      const d = new Date(ts);
+      if (Number.isNaN(d.getTime())) return null;
+      return d.toLocaleString(locale || undefined, opts || undefined);
+    } catch { return null; }
+  }
+
+  function fmtTime(ts) {
+    return fmtDate(ts, CONFIG.timeLocale, CONFIG.timeOptions);
+  }
+
+  /* ---------- ID/URL helpers ---------- */
   function buildIdMap() {
     const m = new Map();
     for (const row of (CONFIG.idMaps || [])) {
@@ -119,19 +110,16 @@ const CONFIG = {
     const k = String(id ?? "");
     return m.get(k) ?? k;
   }
-
-  // Clipboard rewrite
   function rewriteOneDiscordUrl(u, idMap) {
     try {
       const url = new URL(String(u));
       const host = String(url.hostname || "").toLowerCase();
       if (!/^(?:www\.|ptb\.|canary\.)?discord\.com$/.test(host)) return u;
-
       const parts = (url.pathname || "").split("/").filter(Boolean);
       if (parts[0] === "channels") {
-        if (parts[1]) parts[1] = mapId(parts[1], idMap); // guild
-        if (parts[2]) parts[2] = mapId(parts[2], idMap); // channel
-        if (parts[3]) parts[3] = mapId(parts[3], idMap); // message
+        if (parts[1]) parts[1] = mapId(parts[1], idMap);
+        if (parts[2]) parts[2] = mapId(parts[2], idMap);
+        if (parts[3]) parts[3] = mapId(parts[3], idMap);
       } else if (parts[0] === "users" && parts[1]) {
         parts[1] = mapId(parts[1], idMap);
       } else if (parts[0] === "guilds" && parts[1]) {
@@ -156,15 +144,14 @@ const CONFIG = {
     return rewriteDiscordUrlsInText(raw, idMap);
   }
 
-  // Message rewrite (dispatcher)
   function applyUsernameRules(author) {
     if (!author) return;
     for (const r of (CONFIG.usernameRules || [])) {
-      if (r.matchId && String(author.id) === String(r.matchId)) {
+      if (r.matchId && String(author.id) === String(r.matchId) && r.newUsername) {
         author.username = String(r.newUsername);
         if (author.global_name) author.global_name = String(r.newUsername);
       }
-      if (r.matchUsername && author.username === r.matchUsername) {
+      if (r.matchUsername && author.username === r.matchUsername && r.newUsername) {
         author.username = String(r.newUsername);
         if (author.global_name) author.global_name = String(r.newUsername);
       }
@@ -178,23 +165,18 @@ const CONFIG = {
   function rewriteMessageObject(msg) {
     if (!msg) return;
     const idMap = buildIdMap();
-
-    // content
     if (typeof msg.content === "string") {
       msg.content = processTextForIdsAndLinks(msg.content);
     }
-    // mentions
     if (Array.isArray(msg.mentions)) {
       for (const m of msg.mentions) if (m?.id) m.id = mapId(m.id, idMap);
     }
-    // reference
     if (msg.message_reference) {
       const ref = msg.message_reference;
       if (ref.guild_id) ref.guild_id = mapId(ref.guild_id, idMap);
       if (ref.channel_id) ref.channel_id = mapId(ref.channel_id, idMap);
       if (ref.message_id) ref.message_id = mapId(ref.message_id, idMap);
     }
-    // embeds (basic pass)
     if (Array.isArray(msg.embeds)) {
       for (const e of msg.embeds) {
         if (e?.title) e.title = rewriteDiscordUrlsInText(e.title, idMap);
@@ -210,7 +192,6 @@ const CONFIG = {
     applyUsernameRules(author);
   }
 
-  // Wait for module utility
   async function waitForProps(props, timeout = 8000, step = 100) {
     const start = Date.now();
     while (Date.now() - start < timeout) {
@@ -221,18 +202,16 @@ const CONFIG = {
     return null;
   }
 
-  // Patches
   let patcher = null;
+
+  /* ---------- Clipboard & link builders ---------- */
   async function patchClipboard() {
     if (!CONFIG.features.clipboard) return;
     try {
       const Clipboard = await waitForProps(["setString", "getString"]);
       if (!Clipboard) { api.showToast("IDPlus: Clipboard module missing"); return; }
       patcher.before(Clipboard, "setString", (args) => {
-        try {
-          if (!args?.length) return;
-          args[0] = processTextForIdsAndLinks(args[0]);
-        } catch {}
+        try { if (args?.length) args[0] = processTextForIdsAndLinks(args[0]); } catch {}
       });
     } catch {}
   }
@@ -242,8 +221,9 @@ const CONFIG = {
     try {
       const builder = api.findMod?.((m) => {
         for (const k in m) {
-          if (typeof m[k] === "function") {
-            const s = String(m[k]);
+          const fn = m[k];
+          if (typeof fn === "function") {
+            const s = String(fn);
             if (s.includes("discord.com") && s.includes("/channels/")) return true;
           }
         }
@@ -273,6 +253,7 @@ const CONFIG = {
     } catch {}
   }
 
+  /* ---------- Dispatcher rewrite ---------- */
   async function patchDispatcher() {
     if (!CONFIG.features.dispatcher) return;
     try {
@@ -302,7 +283,7 @@ const CONFIG = {
     } catch {}
   }
 
-  // DM helper + message actions
+  /* ---------- DM + message helpers ---------- */
   async function ensureDmChannel(userId) {
     const DMs  = await waitForProps(["getDMFromUserId", "getChannel"]);
     const HTTP = await waitForProps(["get", "post", "put", "del", "patch"]);
@@ -318,49 +299,25 @@ const CONFIG = {
     if (dmUserId) return await ensureDmChannel(String(dmUserId));
     throw new Error("Provide channelId or dmUserId");
   }
-  
-  // Get user info by ID
   async function getUserInfo(userId) {
     const UserStore = await waitForProps(["getUser", "getCurrentUser"]);
     return UserStore?.getUser?.(userId);
   }
-  
-  // Create a fake message that appears to be from another user
 
-  // Create a fake message that appears to be from another user
+  /* ---------- Fake/Inject/Send ---------- */
   async function fakeMessage({ channelId, dmUserId, userId, content, embed, username, avatar, timestamp }) {
     const MessageActions = await waitForProps(["sendMessage", "receiveMessage"]);
     const target = await normalizeTarget({ channelId, dmUserId });
-    
-    // Handle timestamp safely - always use future timestamp to stay at bottom
+
     let messageTimestamp;
-    try {
-      if (timestamp) {
-        // Parse the provided timestamp
-        const date = new Date(timestamp);
-        if (isNaN(date.getTime())) {
-          throw new Error("Invalid timestamp");
-        }
-        messageTimestamp = date.toISOString();
-      } else {
-        // Default: future timestamp far in the future to always stay at bottom
-        const futureDate = new Date();
-        futureDate.setFullYear(futureDate.getFullYear() + 10); // 10 years in the future
-        messageTimestamp = futureDate.toISOString();
-      }
-    } catch (error) {
-      // Fallback to far future timestamp
-      const futureDate = new Date();
-      futureDate.setFullYear(futureDate.getFullYear() + 10);
-      messageTimestamp = futureDate.toISOString();
+    if (timestamp) {
+      const d = new Date(timestamp);
+      messageTimestamp = Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+    } else {
+      messageTimestamp = new Date().toISOString();
     }
-    
-    // Get user info if userId is provided
-    let userInfo = null;
-    if (userId) {
-      userInfo = await getUserInfo(userId);
-    }
-    
+
+    const userInfo = userId ? await getUserInfo(userId) : null;
     const embeds = (embed && (embed.title || embed.description || embed.url || embed.thumbnail)) ? [{
       type: "rich",
       title: embed.title || undefined,
@@ -368,11 +325,17 @@ const CONFIG = {
       url: embed.url || undefined,
       thumbnail: embed.thumbnail ? { url: embed.thumbnail } : undefined
     }] : [];
-  
+
+    let finalContent = String(content ?? "");
+    if (CONFIG.features.fallbackTimePrefixInContent) {
+      const t = fmtTime(messageTimestamp);
+      if (t && !finalContent.startsWith("[")) finalContent = `[${t}] ${finalContent}`;
+    }
+
     const fake = {
       id: String(Date.now() + Math.floor(Math.random() * 1000)),
       type: 0,
-      content: String(content ?? ""),
+      content: finalContent,
       channel_id: target,
       author: {
         id: userId || "0",
@@ -390,14 +353,17 @@ const CONFIG = {
       mention_roles: [],
       mentions: [],
       pinned: false,
-      tts: false
+      tts: false,
+
+      // Our marker so the renderer knows the exact time to show inline
+      __idplusExactTimestamp: messageTimestamp
     };
-    
+
     MessageActions?.receiveMessage?.(target, fake);
-    api.showToast("Fake message injected (persistent bottom)");
+    api.showToast("Fake message injected");
     return fake;
   }
-  
+
   async function injectMessage({ channelId, dmUserId, content, embed }) {
     const MessageActions = await waitForProps(["sendMessage", "receiveMessage"]);
     const target = await normalizeTarget({ channelId, dmUserId });
@@ -411,19 +377,27 @@ const CONFIG = {
       thumbnail: embed.thumbnail ? { url: embed.thumbnail } : undefined
     }] : [];
 
+    let finalContent = String(content ?? "");
+    if (CONFIG.features.fallbackTimePrefixInContent) {
+      const t = fmtTime(nowIso);
+      if (t && !finalContent.startsWith("[")) finalContent = `[${t}] ${finalContent}`;
+    }
+
     const fake = {
       id: String(Date.now()),
       type: 0,
-      content: String(content ?? ""),
+      content: finalContent,
       channel_id: target,
       author: { id: "0", username: "IDPlus", discriminator: "0000", bot: true },
       embeds,
-      timestamp: nowIso
+      timestamp: nowIso,
+      __idplusExactTimestamp: nowIso
     };
+
     MessageActions?.receiveMessage?.(target, fake);
     api.showToast("Injected (local)");
   }
-  
+
   async function sendMessage({ channelId, dmUserId, content, embed }) {
     const MessageActions = await waitForProps(["sendMessage", "receiveMessage"]);
     const target = await normalizeTarget({ channelId, dmUserId });
@@ -447,46 +421,145 @@ const CONFIG = {
     api.showToast("Sent");
   }
 
-  // Auto send fake messages on startup
-  // Auto send fake messages on startup
+  /* ---------- Auto fake (respects timestamp) ---------- */
   async function sendAutoFakeMessages() {
-    if (!CONFIG.features.autoFakeMessages || !Array.isArray(CONFIG.autoFakeMessages)) {
-      return;
-    }
-    
-    // Use a fixed future timestamp that will always stay at the bottom
-    const futureDate = new Date();
-    futureDate.setFullYear(futureDate.getFullYear() + 10); // 10 years in the future
-    const futureTimestamp = futureDate.toISOString();
-    
-    for (const messageConfig of CONFIG.autoFakeMessages) {
-      if (!messageConfig.enabled) continue;
-      
+    if (!CONFIG.features.autoFakeMessages || !Array.isArray(CONFIG.autoFakeMessages)) return;
+    for (const m of CONFIG.autoFakeMessages) {
+      if (!m.enabled) continue;
       try {
-        // Wait for the specified delay
-        await delay(messageConfig.delayMs || 0);
-        
-        // Send the fake message with future timestamp to stay at bottom
+        await delay(m.delayMs || 0);
         await fakeMessage({
-          channelId: messageConfig.channelId,
-          dmUserId: messageConfig.dmUserId,
-          userId: messageConfig.userId,
-          content: messageConfig.content,
-          embed: messageConfig.embed,
-          username: messageConfig.username,
-          avatar: messageConfig.avatar,
-          timestamp: futureTimestamp // Fixed future timestamp to stay at bottom
+          channelId: m.channelId,
+          dmUserId:  m.dmUserId,
+          userId:    m.userId,
+          content:   m.content,
+          embed:     m.embed,
+          username:  m.username,
+          avatar:    m.avatar,
+          timestamp: m.timestamp || undefined
         });
-        
-        api.showToast(`Auto message sent from user ${messageConfig.userId} (persistent bottom)`);
       } catch (error) {
-        console.error("Failed to send auto fake message:", error);
+        console.error("Auto fake message error:", error);
         api.showToast(`Auto message failed: ${error.message}`);
       }
     }
   }
 
-  // Expose console helpers
+  /* ---------- INLINE TIME NEXT TO MESSAGE ---------- */
+  async function patchInlineTimeNextToMessage() {
+    if (!CONFIG.features.inlineTimeNextToMessage) return;
+
+    // Try well-known names first
+    const candidates = [
+      ["MessageContent", "default"],
+      ["MessageContent", "MessageContent"],
+      ["Content", "default"],
+      ["Content", "Content"],
+    ];
+
+    // Util to append a <span> with the time to the rendered content node
+    function appendTimeElement(node, timestampIso) {
+      const t = fmtTime(timestampIso);
+      if (!t || !node) return node;
+
+      const timeSpan = React.createElement(
+        "span",
+        {
+          // Subtle look; adjust as you like
+          style: {
+            marginLeft: 6,
+            fontSize: 12,
+            opacity: 0.6,
+            whiteSpace: "nowrap",
+            verticalAlign: "baseline"
+          }
+        },
+        t
+      );
+
+      try {
+        // Typical shape: node.props.children is the message text tree
+        if (!node.props) return node;
+
+        // If the root already wraps children, append our span to the same level
+        if (Array.isArray(node.props.children)) {
+          node.props.children.push(timeSpan);
+          return node;
+        }
+
+        if (node.props.children) {
+          node.props.children = [node.props.children, timeSpan];
+          return node;
+        }
+
+        // If no children, set it
+        node.props.children = [timeSpan];
+      } catch {}
+      return node;
+    }
+
+    function afterRenderPatch(mod, key) {
+      try {
+        patcher.after(mod, key, (args, res) => {
+          // We only want to modify fake messages we injected (with our marker)
+          // Try to find the message record in the props/args tree
+          const propRoots = [
+            res?.props,
+            args?.[0],
+            res?.props?.message,
+            res?.props?.children?.props,
+            args?.[0]?.message,
+            args?.[0]?.record
+          ];
+
+          let msg = null;
+          for (const p of propRoots) {
+            if (p && p.__idplusExactTimestamp) { msg = p; break; }
+            if (p && p.message && p.message.__idplusExactTimestamp) { msg = p.message; break; }
+            if (p && p.record && p.record.__idplusExactTimestamp) { msg = p.record; break; }
+          }
+          if (!msg || !msg.__idplusExactTimestamp) return res;
+
+          // Append right next to message content
+          return appendTimeElement(res, msg.__idplusExactTimestamp);
+        });
+        return true;
+      } catch { return false; }
+    }
+
+    // Try direct known modules
+    for (const [prop, method] of candidates) {
+      const mod = await waitForProps([prop]);
+      if (mod && typeof mod[method] === "function" && afterRenderPatch(mod, method)) {
+        api.showToast("IDPlus: inline time patch applied");
+        return;
+      }
+    }
+
+    // Heuristic hunt: find a module whose function uses ".message.content"
+    const guess = api.findMod?.((m) => {
+      for (const k in m) {
+        const fn = m[k];
+        if (typeof fn !== "function") continue;
+        const s = String(fn);
+        if (s.includes(".message") && s.includes(".content")) return true;
+      }
+      return false;
+    });
+
+    if (guess) {
+      for (const k in guess) {
+        if (typeof guess[k] === "function" && afterRenderPatch(guess, k)) {
+          api.showToast("IDPlus: inline time patch applied (heuristic)");
+          return;
+        }
+      }
+    }
+
+    api.showToast("IDPlus: inline time patch not found; using prefix fallback");
+  }
+
+  /* ---------- Console helpers ---------- */
   window.__IDPLUS_CTL__ = {
     injectMessage,
     sendMessage,
@@ -506,28 +579,29 @@ const CONFIG = {
     }
   };
 
-  // Plugin lifecycle
+  /* ---------- Lifecycle ---------- */
   async function onStart() {
     try {
-      // wait a bit for modules to settle
       const ms = Number(CONFIG.startDelayMs || 0);
       if (ms > 0) await delay(ms);
 
       const P = api.patcher();
-      patcher = P?.create?.("idplus-full") || null;
+      patcher = P?.create?.("idplus-full-inline-time") || null;
       if (!patcher) { api.showToast("IDPlus: patcher missing"); return; }
 
       await patchClipboard();
       await patchLinkBuilders();
       await patchDispatcher();
 
-      // Start auto fake messages if enabled
+      // Append the inline time span directly next to the message text
+      await patchInlineTimeNextToMessage();
+
       if (CONFIG.features.autoFakeMessages) {
         sendAutoFakeMessages();
       }
 
-      api.showToast("IDPlus: full features active");
-    } catch (e) {
+      api.showToast("IDPlus: full features active (inline time)");
+    } catch {
       api.showToast("IDPlus: failed to start");
     }
   }
@@ -538,16 +612,14 @@ const CONFIG = {
     api.showToast("IDPlus: stopped");
   }
 
-  // Register (prefer Enmity register; fallback CommonJS export)
   const reg = api.register.bind(api);
   if (reg) {
     reg({
-      name: "IDPlus (Full, No Settings)",
+      name: "IDPlus (Full, Inline Time)",
       onStart,
       onStop
-      // No getSettingsPanel — nothing to open, so no settings crash possible.
     });
   } else {
-    module.exports = { name: "IDPlus (Full, No Settings)", onStart, onStop };
+    module.exports = { name: "IDPlus (Full, Inline Time)", onStart, onStop };
   }
 })();
