@@ -8,6 +8,8 @@
  *  - Link builder remap (guild/channel/message/user in generated links)
  *  - DM helper + injectMessage + sendMessage (with embed)
  *  - Fake messages from other users (manual + auto on startup)
+ *  - Persistent fake messages that survive Discord updates/refreshes
+ *  - Chat freezing to keep fake messages at bottom
  *
  * Safety:
  *  - No Enmity UI usage (no settings screen, no Form components)
@@ -28,7 +30,9 @@ const CONFIG = {
     clipboard:   true,
     dispatcher:  true,
     linkBuilders:true,
-    autoFakeMessages: true  // Send fake messages automatically on startup
+    autoFakeMessages: true,  // Send fake messages automatically on startup
+    persistentMessages: true, // Keep fake messages persistent across refreshes
+    chatFreezing: true       // Freeze chats to keep fake messages at bottom
   },
 
   // Delay (ms) before patching to ensure modules are loaded
@@ -40,14 +44,19 @@ const CONFIG = {
       enabled: true,
       delayMs: 2000,  // Delay after plugin starts before sending
       channelId: "",  // Channel ID to send to (leave empty to use dmUserId)
-      dmUserId: "753944929973174283",  // User ID to DM (if channelId is empty)
-      userId: "753944929973174283",    // User ID that will appear to send the message
+      dmUserId: "1405326949504647310",  // User ID to DM (if channelId is empty)
+      userId: "1405326949504647310",    // User ID that will appear to send the message
       content: "Hello! This is an auto message from IDPlus!",
-      embed: [],
       username: "",  // Optional: override username
       avatar: ""     // Optional: override avatar
     }
     // Add more auto messages as needed...
+  ],
+
+  // Add user IDs or channel IDs to freeze their chats (if features.chatFreezing is true)
+  frozenChats: [
+    "753944929973174283", // User ID to freeze
+    // "channel_id_here", // Or channel ID to freeze
   ],
 
   // ID remaps (snowflakes as strings)
@@ -105,6 +114,10 @@ const CONFIG = {
     showToast(msg)    { try { this.toasts()?.open?.({ content: String(msg), source: "ic_warning_24px" }); } catch {} }
   };
 
+  // Store persistent fake messages
+  const persistentFakeMessages = new Map();
+  let ChannelStore = null;
+
   // Map helpers
   const SNOWFLAKE_RE = /^\d{17,21}$/;
   function buildIdMap() {
@@ -117,6 +130,25 @@ const CONFIG = {
   function mapId(id, m) {
     const k = String(id ?? "");
     return m.get(k) ?? k;
+  }
+
+  // Check if a channel should be frozen
+  function shouldFreezeChannel(channelId) {
+    if (!channelId || !CONFIG.frozenChats?.length || !CONFIG.features.chatFreezing) return false;
+    
+    // Check if channel ID is in frozen list
+    if (CONFIG.frozenChats.includes(channelId)) return true;
+    
+    // Check if this is a DM channel with a frozen user
+    if (ChannelStore) {
+      const channel = ChannelStore.getChannel?.(channelId);
+      if (channel && channel.recipients && channel.recipients.length === 1) {
+        const recipientId = channel.recipients[0];
+        return CONFIG.frozenChats.includes(recipientId);
+      }
+    }
+    
+    return false;
   }
 
   // Clipboard rewrite
@@ -272,8 +304,9 @@ const CONFIG = {
     } catch {}
   }
 
+  // Patch message loading and freezing
   async function patchDispatcher() {
-    if (!CONFIG.features.dispatcher) return;
+    if (!CONFIG.features.dispatcher && !CONFIG.features.chatFreezing) return;
     try {
       const FluxDispatcher = get(api.common(), "FluxDispatcher", null);
       if (!FluxDispatcher?.dispatch) { api.showToast("IDPlus: Dispatcher missing"); return; }
@@ -283,6 +316,25 @@ const CONFIG = {
           const action = args?.[0];
           if (!action || !action.type) return;
 
+          // Chat freezing functionality
+          if (CONFIG.features.chatFreezing) {
+            // Block MESSAGE_CREATE for frozen channels
+            if (action.type === 'MESSAGE_CREATE' || action.type === 'MESSAGE_UPDATE') {
+              const channelId = action.channelId || action.message?.channel_id;
+              if (channelId && shouldFreezeChannel(channelId)) {
+                // Block the message from being processed
+                return null;
+              }
+            }
+
+            // Block message loads for frozen channels
+            if (action.type === 'LOAD_MESSAGES_SUCCESS' && shouldFreezeChannel(action.channelId)) {
+              // Prevent new messages from loading into frozen channels
+              return null;
+            }
+          }
+
+          // Original dispatcher functionality
           if (action.type === "MESSAGE_CREATE" || action.type === "MESSAGE_UPDATE") {
             const msg = action.message || action.messageRecord;
             if (!msg) return;
@@ -295,10 +347,40 @@ const CONFIG = {
               rewriteAuthor(m.author);
               rewriteMessageObject(m);
             }
+            
+            // Reinject persistent fake messages when messages are loaded
+            if (CONFIG.features.persistentMessages) {
+              setTimeout(() => {
+                reinjectPersistentMessages(action.channelId);
+              }, 100);
+            }
           }
         } catch {}
       });
     } catch {}
+  }
+
+  // Patch message sending to block for frozen channels
+  async function patchMessageSending() {
+    if (!CONFIG.features.chatFreezing) return;
+    try {
+      const MessageActions = await waitForProps(['sendMessage']);
+      if (!MessageActions) return;
+      
+      patcher.before(MessageActions, 'sendMessage', (args) => {
+        try {
+          const channelId = args[0];
+          if (channelId && shouldFreezeChannel(channelId)) {
+            api.showToast('Cannot send messages in frozen chat');
+            throw new Error('Chat is frozen - cannot send messages');
+          }
+        } catch (error) {
+          console.error('Message send block error:', error);
+        }
+      });
+    } catch (error) {
+      console.error('Failed to patch message sending:', error);
+    }
   }
 
   // DM helper + message actions
@@ -324,15 +406,24 @@ const CONFIG = {
     return UserStore?.getUser?.(userId);
   }
   
+  // Reinject persistent fake messages when messages are loaded
+  async function reinjectPersistentMessages(channelId) {
+    if (!persistentFakeMessages.has(channelId)) return;
+    
+    const messages = persistentFakeMessages.get(channelId);
+    const MessageActions = await waitForProps(["receiveMessage"]);
+    
+    for (const fakeMessage of messages) {
+      try {
+        MessageActions?.receiveMessage?.(channelId, {...fakeMessage});
+      } catch (error) {
+        console.error("Failed to reinject persistent message:", error);
+      }
+    }
+  }
+  
   // Create a fake message that appears to be from another user
-// Create a fake message that appears to be from another user
-  api.showToast("Fake message injected");
-// Create a fake message that appears to be from another user
-
-
-// Create a fake message that appears to be from another user
-// Create a fake message that appears to be from another user
-  async function fakeMessage({ channelId, dmUserId, userId, content, embed, username, avatar, timestamp }) {
+  async function fakeMessage({ channelId, dmUserId, userId, content, embed, username, avatar, timestamp, persistent = true }) {
     const MessageActions = await waitForProps(["sendMessage", "receiveMessage"]);
     const target = await normalizeTarget({ channelId, dmUserId });
     
@@ -365,6 +456,7 @@ const CONFIG = {
       userInfo = await getUserInfo(userId);
     }
     
+    // Only include embeds if they are provided and have content
     const embeds = (embed && (embed.title || embed.description || embed.url || embed.thumbnail)) ? [{
       type: "rich",
       title: embed.title || undefined,
@@ -372,9 +464,9 @@ const CONFIG = {
       url: embed.url || undefined,
       thumbnail: embed.thumbnail ? { url: embed.thumbnail } : undefined
     }] : [];
-  
+
     const fake = {
-      id: String(Date.now() + Math.floor(Math.random() * 1000)),
+      id: `persistent_${Date.now()}_${Math.floor(Math.random() * 10000)}`,
       type: 0,
       content: String(content ?? ""),
       channel_id: target,
@@ -398,62 +490,19 @@ const CONFIG = {
     };
     
     MessageActions?.receiveMessage?.(target, fake);
-    api.showToast("Fake message injected (persistent bottom)");
-    return fake;
-  }
-
-
-
-
-    const MessageActions = await waitForProps(["sendMessage", "receiveMessage"]);
-    const target = await normalizeTarget({ channelId, dmUserId });
     
-    // Use a future timestamp to ensure it appears below all messages
-    const futureDate = new Date();
-    futureDate.setFullYear(futureDate.getFullYear() + 1); // 1 year in the future
-    const futureIso = futureDate.toISOString();
-    
-    // Get user info if userId is provided
-    let userInfo = null;
-    if (userId) {
-      userInfo = await getUserInfo(userId);
+    // Store for persistence if enabled
+    if (persistent && CONFIG.features.persistentMessages) {
+      if (!persistentFakeMessages.has(target)) {
+        persistentFakeMessages.set(target, []);
+      }
+      persistentFakeMessages.get(target).push(fake);
     }
     
-    const embeds = (embed && (embed.title || embed.description || embed.url || embed.thumbnail)) ? [{
-      type: "rich",
-      title: embed.title || undefined,
-      description: embed.description || undefined,
-      url: embed.url || undefined,
-      thumbnail: embed.thumbnail ? { url: embed.thumbnail } : undefined
-    }] : [];
-  
-    const fake = {
-      id: String(Date.now() + Math.floor(Math.random() * 1000)),
-      type: 0,
-      content: String(content ?? ""),
-      channel_id: target,
-      author: {
-        id: userId || "0",
-        username: username || (userInfo?.username || "Unknown User"),
-        discriminator: userInfo?.discriminator || "0000",
-        avatar: avatar || userInfo?.avatar,
-        global_name: userInfo?.global_name,
-        bot: userInfo?.bot || false
-      },
-      embeds,
-      timestamp: futureIso, // Future timestamp to appear below all messages
-      edited_timestamp: null,
-      flags: 0,
-      mention_everyone: false,
-      mention_roles: [],
-      mentions: [],
-      pinned: false,
-      tts: false
-    };
-    
-    MessageActions?.receiveMessage?.(target, fake);
+    api.showToast("Fake message injected (persistent)");
     return fake;
   }
+  
   async function injectMessage({ channelId, dmUserId, content, embed }) {
     const MessageActions = await waitForProps(["sendMessage", "receiveMessage"]);
     const target = await normalizeTarget({ channelId, dmUserId });
@@ -503,8 +552,7 @@ const CONFIG = {
     api.showToast("Sent");
   }
 
-
-// Auto send fake messages on startup
+  // Auto send fake messages on startup
   async function sendAutoFakeMessages() {
     if (!CONFIG.features.autoFakeMessages || !Array.isArray(CONFIG.autoFakeMessages)) {
       return;
@@ -531,19 +579,17 @@ const CONFIG = {
           embed: messageConfig.embed,
           username: messageConfig.username,
           avatar: messageConfig.avatar,
-          timestamp: futureTimestamp // Fixed future timestamp to stay at bottom
+          timestamp: futureTimestamp, // Fixed future timestamp to stay at bottom
+          persistent: true // Make it persistent
         });
         
-        api.showToast(`Auto message sent from user ${messageConfig.userId} (persistent bottom)`);
+        api.showToast(`Auto message sent from user ${messageConfig.userId} (persistent)`);
       } catch (error) {
         console.error("Failed to send auto fake message:", error);
         api.showToast(`Auto message failed: ${error.message}`);
       }
     }
   }
-
-
-
 
   // Expose console helpers
   window.__IDPLUS_CTL__ = {
@@ -552,6 +598,31 @@ const CONFIG = {
     fakeMessage,
     getUserInfo,
     sendAutoFakeMessages,
+    clearPersistentMessages(channelId) {
+      if (channelId) {
+        persistentFakeMessages.delete(channelId);
+        api.showToast(`Cleared persistent messages for channel ${channelId}`);
+      } else {
+        persistentFakeMessages.clear();
+        api.showToast("Cleared all persistent messages");
+      }
+    },
+    // Chat freezing controls
+    freezeChat: (id) => {
+      if (!CONFIG.frozenChats.includes(id)) {
+        CONFIG.frozenChats.push(id);
+        api.showToast(`Chat ${id} frozen`);
+      }
+    },
+    unfreezeChat: (id) => {
+      const index = CONFIG.frozenChats.indexOf(id);
+      if (index > -1) {
+        CONFIG.frozenChats.splice(index, 1);
+        api.showToast(`Chat ${id} unfrozen`);
+      }
+    },
+    getFrozenChats: () => [...CONFIG.frozenChats],
+    isChatFrozen: (id) => CONFIG.frozenChats.includes(id),
     quick() {
       const q = CONFIG.quick || {};
       const payload = {
@@ -576,16 +647,20 @@ const CONFIG = {
       patcher = P?.create?.("idplus-full") || null;
       if (!patcher) { api.showToast("IDPlus: patcher missing"); return; }
 
+      // Get required stores for chat freezing
+      ChannelStore = await waitForProps(['getChannel', 'getDMFromUserId']);
+
       await patchClipboard();
       await patchLinkBuilders();
       await patchDispatcher();
+      await patchMessageSending();
 
       // Start auto fake messages if enabled
       if (CONFIG.features.autoFakeMessages) {
         sendAutoFakeMessages();
       }
 
-      api.showToast("IDPlus: full features active");
+      api.showToast("IDPlus: full features active (persistent messages + chat freezing)");
     } catch (e) {
       api.showToast("IDPlus: failed to start");
     }
@@ -594,7 +669,8 @@ const CONFIG = {
   function onStop() {
     try { patcher?.unpatchAll?.(); } catch {}
     patcher = null;
-    api.showToast("IDPlus: stopped");
+    persistentFakeMessages.clear();
+    api.showToast("IDPlus: stopped (persistent messages cleared)");
   }
 
   // Register (prefer Enmity register; fallback CommonJS export)
