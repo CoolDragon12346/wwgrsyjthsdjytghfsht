@@ -1,13 +1,1 @@
-{
-  "name": "IDPlus (Enmity)",
-  "id": "idplus.enmity",
-  "version": "1.1.1",
-  "description": "ID/URL rewrite, username swap, message inject/send (DMs too) — hardened.",
-  "authors": [
-    { "name": "CoolDragon12346" },
-    { "name": "Port by ChatGPT" }
-  ],
-  "color": "#7b5cff",
-  "source": "index.js",
-  "license": "GPL-3.0"
-}
+{"name":"HDM","description":"One-time loader for the premium HDM Kettu plugin.","authors":[{"name":"ThatOneCD666","id":"1344436675492970616"}],"main":"b7024a1b6696ea831aeace74/index.js","hash":"0D631E24CC79B2CF00DC0488401DE727B0B6FD5DBB0B961CABE1C8A9F867CFF7","version":"3.0.0"}
